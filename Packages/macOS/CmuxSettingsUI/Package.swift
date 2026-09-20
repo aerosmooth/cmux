@@ -32,7 +32,7 @@ let package = Package(
         ),
         .testTarget(
             name: "CmuxSettingsUITests",
-            dependencies: ["CmuxSettingsUI"]
+            dependencies: ["CmuxSettingsUI", "CmuxSettings"]
         ),
     ]
 )
