@@ -1316,6 +1316,24 @@ fn restore_agent_roster(registry: &WorkspaceRegistry) -> anyhow::Result<AgentRos
     Ok(host)
 }
 
+fn agent_provider_identity(ingress: &crate::JournalIngress) -> Option<String> {
+    ingress
+        .payload
+        .get("normalized")
+        .and_then(|normalized| normalized.get("agent_type"))
+        .and_then(Value::as_str)
+        .or_else(|| {
+            ingress
+                .payload
+                .get("adapter")
+                .and_then(|adapter| adapter.get("id"))
+                .and_then(Value::as_str)
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_ascii_lowercase)
+}
+
 #[derive(Debug, Clone)]
 pub struct AgentRecord {
     pub surface: SurfaceId,
@@ -1474,6 +1492,7 @@ struct TerminalAgentRecord {
     state: AgentState,
     source: AgentSource,
     session: Option<String>,
+    agent: Option<String>,
     updated_at_ms: u64,
 }
 
@@ -6041,6 +6060,7 @@ impl Mux {
             Some(hook_state),
             Some(sequence),
             AgentReportOrigin::RosterFold,
+            agent_provider_identity(ingress),
         )?;
         fences.insert(
             terminal_id.clone(),
@@ -10145,6 +10165,7 @@ impl Mux {
             None,
             None,
             AgentReportOrigin::Direct,
+            None,
         )
     }
 
@@ -10162,6 +10183,7 @@ impl Mux {
         hook_state: Option<crate::workspace_registry::AgentHookProjectionState>,
         journal_sequence: Option<u64>,
         origin: AgentReportOrigin,
+        agent_adapter: Option<String>,
     ) -> anyhow::Result<AgentRecord> {
         let mutation = WorkspaceMutation::new(
             format!("raw-agent-{}", crate::workspace_registry::new_uuid_v4()),
@@ -10186,7 +10208,7 @@ impl Mux {
             hook_state.as_ref(),
             journal_sequence,
             origin,
-            None,
+            agent_adapter,
         )?;
         let record = record.context("fresh raw agent report unexpectedly replayed")?;
         if source != AgentSource::Hook {
@@ -10370,6 +10392,9 @@ impl Mux {
                     || existing.source == AgentSource::Detected
                     || existing.source == AgentSource::Plugin
             }) || durable_stronger.is_some());
+        let agent_adapter = agent_adapter.or_else(|| {
+            records.get(&terminal_id).and_then(|record| record.agent.clone())
+        });
         let record = match records.get(&terminal_id) {
             Some(existing) if socket_report_ignored => existing.clone(),
             None if socket_report_ignored => match durable_stronger {
@@ -10383,12 +10408,14 @@ impl Mux {
                         AgentSource::Hook
                     },
                     session: existing.source_session,
+                    agent: existing.agent,
                     updated_at_ms: existing.updated_at_ms,
                 },
                 None => TerminalAgentRecord {
                     state: agent_state,
                     source,
                     session: source_session,
+                    agent: agent_adapter.clone(),
                     updated_at_ms: now,
                 },
             },
@@ -10396,6 +10423,7 @@ impl Mux {
                 state: agent_state,
                 source,
                 session: source_session,
+                agent: agent_adapter.clone(),
                 updated_at_ms: now,
             },
         };
@@ -10417,6 +10445,7 @@ impl Mux {
             "source":record.source.as_str(),
             "updated_at_ms":record.updated_at_ms.to_string(),
             "source_session":persisted_source_session.as_deref().or(record.session.as_deref()),
+            "agent":record.agent,
         });
         let mut public_value = value.clone();
         public_value["source_session"] = serde_json::json!(record.session.as_deref());
@@ -10468,7 +10497,7 @@ impl Mux {
             state: record.state,
             source: record.source,
             session: record.session,
-            agent: agent_adapter,
+            agent: record.agent,
             updated_at_ms: record.updated_at_ms,
         };
         if !commit.replayed {
@@ -23835,7 +23864,7 @@ mod tests {
             "claude",
             "UserPromptSubmit",
             Some(&terminal_id.to_string()),
-            serde_json::json!({}),
+            serde_json::json!({"agent_type":"claude"}),
         )
         .unwrap();
 
@@ -23845,6 +23874,9 @@ mod tests {
         mux.apply_agent_hook_record(&hook, 1).unwrap();
 
         assert_eq!(mux.list_agents(Some(surface.id), None)[0].state, AgentState::Working);
+        assert_eq!(mux.list_agents(Some(surface.id), None)[0].agent.as_deref(), Some("claude"));
+        let snapshot = crate::resource_api::public_session_snapshot(&mux).unwrap();
+        assert_eq!(snapshot["agents"][0]["agent"], serde_json::json!("claude"));
         assert_eq!(
             mux.agent_hook_fences.lock().unwrap().get(&terminal_id).map(|fence| fence.sequence),
             Some(1)
