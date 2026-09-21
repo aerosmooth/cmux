@@ -165,11 +165,13 @@ public struct ArrowlessPopoverAnchor<PopoverContent: View>: NSViewRepresentable 
         func dismiss() {
             cancelDeferredRootViewUpdate()
             unregisterFromGroup()
+            if group != nil { popover?.animates = false }
             popover?.performClose(nil)
             popover = nil
         }
 
         public func popoverWillClose(_ notification: Notification) {
+            guard let closing = notification.object as? NSPopover, closing === popover else { return }
             unregisterFromGroup()
         }
 
@@ -180,6 +182,7 @@ public struct ArrowlessPopoverAnchor<PopoverContent: View>: NSViewRepresentable 
         }
 
         public func popoverDidClose(_ notification: Notification) {
+            guard let closing = notification.object as? NSPopover, closing === popover else { return }
             cancelDeferredRootViewUpdate()
             popover = nil
             if isPresented {
@@ -190,7 +193,13 @@ public struct ArrowlessPopoverAnchor<PopoverContent: View>: NSViewRepresentable 
         private func makePopover() -> NSPopover {
             let popover = NSPopover()
             popover.behavior = group == nil ? .semitransient : .applicationDefined
-            popover.animates = group == nil
+            // Grouping owns dismissal, not the root menu's native opening transition.
+            // Hover submenus still open immediately, and Reduce Motion always wins.
+            let isSubmenu = anchorView.flatMap { group?.parentID(for: $0) } != nil
+            popover.animates = CmuxPopoverAnimationPolicy(
+                reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+                isSubmenu: isSubmenu
+            ).animatesOnPresentation
             popover.setValue(true, forKeyPath: "shouldHideAnchor")
             popover.contentViewController = hostingController
             popover.delegate = self

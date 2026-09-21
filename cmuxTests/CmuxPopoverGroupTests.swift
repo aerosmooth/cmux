@@ -6,6 +6,22 @@ import Testing
 @MainActor
 @Suite
 struct CmuxPopoverGroupTests {
+    @Test func groupedRootUsesNativeOpeningAnimation() {
+        let policy = CmuxPopoverAnimationPolicy(reduceMotion: false, isSubmenu: false)
+        #expect(policy.animatesOnPresentation)
+    }
+
+    @Test func groupedSubmenuRemainsImmediate() {
+        let policy = CmuxPopoverAnimationPolicy(reduceMotion: false, isSubmenu: true)
+        #expect(!policy.animatesOnPresentation)
+    }
+
+    @Test(arguments: [false, true])
+    func reduceMotionDisablesOpeningAnimationForRootAndSubmenu(isSubmenu: Bool) {
+        let policy = CmuxPopoverAnimationPolicy(reduceMotion: true, isSubmenu: isSubmenu)
+        #expect(!policy.animatesOnPresentation)
+    }
+
     @Test func groupClosePolicyDisablesAnimationBeforeClosing() {
         let group = CmuxPopoverGroup()
         let anchor = NSView()
