@@ -82,7 +82,7 @@ public struct ArrowlessPopoverAnchor<PopoverContent: View>: NSViewRepresentable 
         weak var anchorView: NSView?
         private let hostingController = NSHostingController(rootView: AnyView(EmptyView()))
         private let visibleUpdateScheduler = CmuxPopoverVisibleUpdateScheduler()
-        private var popover: NSPopover?
+        private(set) var popover: NSPopover?
         private var pendingVisibleRootView: AnyView?
         private let group: CmuxPopoverGroup?
         private var groupMemberID: UUID?

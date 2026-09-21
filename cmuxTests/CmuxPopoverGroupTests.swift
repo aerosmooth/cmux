@@ -1,10 +1,73 @@
 import AppKit
+import SwiftUI
 import Testing
 @testable import CmuxAppKitSupportUI
 
 @MainActor
 @Suite
 struct CmuxPopoverGroupTests {
+    @Test func groupClosePolicyDisablesAnimationBeforeClosing() {
+        let group = CmuxPopoverGroup()
+        let anchor = NSView()
+        let popover = NSPopover()
+        popover.animates = true
+        _ = group.register(popover: popover, anchor: anchor)
+        defer { group.dismissAll() }
+
+        group.handleClick(windowNumber: nil, point: .zero)
+        #expect(!popover.animates)
+    }
+
+    @Test func rapidNativeOpenCloseRetainsOpeningPolicyAndDismissal() throws {
+        let window = NSWindow(contentRect: CGRect(x: 100, y: 100, width: 300, height: 300),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let anchor = NSView(frame: CGRect(x: 20, y: 20, width: 30, height: 30))
+        window.contentView?.addSubview(anchor)
+        window.orderFront(nil)
+        let group = CmuxPopoverGroup()
+        var isPresented = false
+        let coordinator = ArrowlessPopoverAnchor<EmptyView>.Coordinator(
+            isPresented: Binding(get: { isPresented }, set: { isPresented = $0 }), group: group
+        )
+        coordinator.anchorView = anchor
+        coordinator.updateRootView(AnyView(Color.clear.frame(width: 220, height: 120)))
+        defer {
+            group.dismissAll()
+            coordinator.dismiss()
+            window.close()
+        }
+
+        var previous: NSPopover?
+        for attempt in 0..<4 {
+            isPresented = true
+            coordinator.present(preferredEdge: .maxY, detachedGap: 4)
+            let current = try #require(coordinator.popover)
+            #expect(current.isShown)
+            #expect(current.animates == !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+            #expect(current.behavior == .applicationDefined)
+            if let previous {
+                coordinator.popoverWillClose(Notification(name: NSPopover.willCloseNotification, object: previous))
+                coordinator.popoverDidClose(Notification(name: NSPopover.didCloseNotification, object: previous))
+                #expect(isPresented)
+                #expect(coordinator.popover === current)
+            }
+
+            // Interrupt the native opening before yielding, alternating both close paths.
+            if attempt.isMultiple(of: 2) {
+                group.handleClick(windowNumber: nil, point: CGPoint(x: -100_000, y: -100_000))
+            } else {
+                isPresented = false
+                coordinator.dismiss()
+            }
+            #expect(!current.animates)
+            #expect(!current.isShown)
+            #expect(!isPresented)
+            #expect(coordinator.popover == nil)
+            previous = current
+        }
+    }
+
     @Test func clicksInsideEitherMenuKeepBothOpen() {
         let group = CmuxPopoverGroup()
         let parent = UUID()
