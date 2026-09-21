@@ -1236,6 +1236,7 @@ fn agent_hook_notification(
         .map(|text| text.chars().take(BODY_MAX_CHARS).collect::<String>())
         .unwrap_or_default();
     Some((format!("{agent} {verb}"), body, level))
+}
 
 /// A stored projection state string as its typed form; unknown spellings
 /// degrade to `Unknown`, which every agents view hides.
